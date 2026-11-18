@@ -1,0 +1,36 @@
+{
+  "name": "@shabad/mobile",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "private": true,
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "npm run corpus && expo start --web",
+    "corpus": "node scripts/copy-corpus.js",
+    "export:web": "npm run corpus && expo export --platform web --output-dir dist && node scripts/postexport.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@expo-google-fonts/noto-sans": "^0.4.2",
+    "@expo-google-fonts/noto-sans-gurmukhi": "^0.4.1",
+    "@expo/metro-runtime": "~58.0.17",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@shabad/core": "*",
+    "expo": "~58.0.26",
+    "expo-constants": "~58.0.15",
+    "expo-font": "~58.0.11",
+    "expo-speech-recognition": "58.0.1",
+    "expo-status-bar": "~58.0.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-web": "~0.21.4"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.3"
+  }
+}

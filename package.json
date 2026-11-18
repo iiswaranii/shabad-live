@@ -17,7 +17,7 @@
     "test": "node --import tsx --test packages/core/test/*.test.ts services/api/test/*.test.ts",
     "typecheck": "tsc -p packages/core && tsc -p tools/cli && tsc -p services/api",
     "web:build": "npm run -w apps/mobile export:web",
-    "web:serve": "npx serve apps/mobile/dist -l 8088"
+    "web:deploy": "bash scripts/deploy-pages.sh"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

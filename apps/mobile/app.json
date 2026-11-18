@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "Shabad Live",
+    "slug": "shabad-live",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.shabadlive.mobile"
+    },
+    "android": {
+      "package": "app.shabadlive.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#FBF8F2",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single",
+      "name": "Shabad Live",
+      "shortName": "Shabad Live",
+      "lang": "en",
+      "themeColor": "#A9500C",
+      "backgroundColor": "#FBF8F2"
+    },
+    "experiments": {
+      "baseUrl": "/shabad-live"
+    },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Shabad Live uses the microphone only while you choose to listen, to recognise the shabad being sung. Audio is not recorded or kept.",
+          "speechRecognitionPermission": "Speech recognition turns the kirtan you hear into words so the matching shabad can be found and followed.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ]
+    ],
+    "extra": {
+      "corpusUrl": "https://iiswaranii.github.io/shabad-live/corpus/"
+    }
+  }
+}

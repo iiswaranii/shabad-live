@@ -33,7 +33,13 @@ export type PlanStep = { lineId: string } | { instrumentalSec: number; audience?
 
 export interface SimWindow { t0: number; t1: number; text: string }
 export interface TruthSegment { t0: number; t1: number; lineId: string | null }
-export interface SimClip { windows: SimWindow[]; truth: TruthSegment[]; durationSec: number }
+export interface SimClip {
+  windows: SimWindow[];
+  truth: TruthSegment[];
+  durationSec: number;
+  /** Recognised words with their end times, for real-time playback (Practice mode). */
+  words: { t: number; text: string }[];
+}
 
 export function rng(seed: number) {
   let s = seed >>> 0 || 1;
@@ -102,7 +108,8 @@ export function simulate(corpus: Corpus, plan: PlanStep[], profile: Profile, see
     if (profile.script === 'devanagari') text = gurmukhiToDevanagari(text);
     windows.push({ t0: round(t0), t1: round(end), text });
   }
-  return { windows, truth, durationSec: round(t) };
+  const outWords = sung.map((s) => ({ t: round(s.t1), text: profile.script === 'devanagari' ? gurmukhiToDevanagari(s.text) : s.text }));
+  return { windows, truth, durationSec: round(t), words: outWords };
 }
 
 /** Verses are runs of lines ending in a numbered ॥N॥ marker; rahao lines stand alone. */
