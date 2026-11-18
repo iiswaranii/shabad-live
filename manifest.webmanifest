@@ -1,0 +1,17 @@
+{
+  "name": "Shabad Live",
+  "short_name": "Shabad Live",
+  "start_url": "/shabad-live/",
+  "scope": "/shabad-live/",
+  "display": "standalone",
+  "background_color": "#FBF8F2",
+  "theme_color": "#A9500C",
+  "icons": [
+    {
+      "src": "/shabad-live/icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
