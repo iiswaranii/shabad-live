@@ -1,0 +1,27 @@
+{
+  "name": "shabad-live",
+  "private": true,
+  "description": "Live shabad recognition for kirtan listeners: identify the shabad being sung and follow the current pangti.",
+  "workspaces": [
+    "packages/*",
+    "tools/*",
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "import": "node tools/importer/import.js",
+    "synth": "tsx tools/cli/src/main.ts synth",
+    "recognize": "tsx tools/cli/src/main.ts recognize",
+    "eval": "tsx tools/cli/src/main.ts eval",
+    "api": "tsx services/api/src/server.ts",
+    "test": "node --import tsx --test packages/core/test/*.test.ts services/api/test/*.test.ts",
+    "typecheck": "tsc -p packages/core && tsc -p tools/cli && tsc -p services/api",
+    "web:build": "npm run -w apps/mobile export:web",
+    "web:serve": "npx serve apps/mobile/dist -l 8088"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "~6.0.3"
+  }
+}

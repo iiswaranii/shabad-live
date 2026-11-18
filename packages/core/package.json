@@ -1,0 +1,8 @@
+{
+  "name": "@shabad/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shabad recognition engine: normalised Gurmukhi search index, candidate retrieval, ambiguity handling and live line tracking. No platform dependencies.",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

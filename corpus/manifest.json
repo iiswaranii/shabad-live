@@ -1,0 +1,41 @@
+{
+  "format": "shabad-live-corpus-manifest@1",
+  "packs": [
+    {
+      "file": "sri-guru-granth-sahib-ji.json",
+      "sourceId": 1,
+      "nameEn": "Sri Guru Granth Sahib Ji",
+      "namePa": "ਸ਼੍ਰੀ ਗੁਰੂ ਗ੍ਰੰਥ ਸਾਹਿਬ ਜੀ",
+      "shabads": 5549,
+      "lines": 60555,
+      "bytes": 6778171
+    },
+    {
+      "file": "vaaran-bhai-gurdas-ji.json",
+      "sourceId": 3,
+      "nameEn": "Vaaran Bhai Gurdas Ji",
+      "namePa": "ਵਾਰਾਂ ਭਾਈ ਗੁਰਦਾਸ ਜੀ",
+      "shabads": 941,
+      "lines": 7585,
+      "bytes": 889829
+    },
+    {
+      "file": "ghazals-bhai-nand-lal-ji.json",
+      "sourceId": 5,
+      "nameEn": "Ghazals Bhai Nand Lal Ji",
+      "namePa": "ਗ਼ਜ਼ਲਾਂ ਭਾਈ ਨੰਦ ਲਾਲ ਜੀ",
+      "shabads": 64,
+      "lines": 806,
+      "bytes": 106261
+    },
+    {
+      "file": "sri-dasam-granth.json",
+      "sourceId": 2,
+      "nameEn": "Sri Dasam Granth",
+      "namePa": "ਸ਼੍ਰੀ ਦਸਮ ਗ੍ਰੰਥ",
+      "shabads": 5470,
+      "lines": 67758,
+      "bytes": 6896162
+    }
+  ]
+}

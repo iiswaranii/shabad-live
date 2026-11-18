@@ -1,0 +1,8 @@
+{
+  "name": "@shabad/importer",
+  "private": true,
+  "description": "Imports verified Gurbani from the Shabad OS database into corpus packs. gurmukhi-utils (GPL-3.0) is used only at import time and is not shipped in the app.",
+  "dependencies": {
+    "gurmukhi-utils": "3.2.2"
+  }
+}

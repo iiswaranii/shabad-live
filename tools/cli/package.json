@@ -1,0 +1,6 @@
+{
+  "name": "@shabad/cli",
+  "private": true,
+  "bin": { "shabad": "src/main.ts" },
+  "dependencies": { "@shabad/core": "*" }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "@shabad/api",
+  "private": true,
+  "dependencies": { "@shabad/core": "*" }
+}
