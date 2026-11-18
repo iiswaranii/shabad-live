@@ -1,5 +1,5 @@
 import type { Corpus, Line } from './corpus';
-import type { Token } from './normalize';
+import { joinTokens, type Token } from './normalize';
 
 export interface LineHit {
   line: Line;
@@ -63,6 +63,14 @@ export function align(query: Token[], line: Line): LineHit | null {
       if (up > h) { h = up; mw = MW[i - 1][j]; mc = MC[i - 1][j]; }
       const left = H[i][j - 1] - Math.min(1.5, LINE_GAP * W[j - 1]);
       if (left > h) { h = left; mw = MW[i][j - 1]; mc = MC[i][j - 1]; }
+      if (i >= 2) {
+        // Two heard tokens that are one line word split by the recogniser.
+        const js = tokenSim(joinTokens(query[i - 2], query[i - 1]), line.tokens[j - 1]);
+        if (js > 0) {
+          const jn = H[i - 2][j - 1] + 0.9 * js * W[j - 1];
+          if (jn > h) { h = jn; mw = MW[i - 2][j - 1] + W[j - 1]; mc = MC[i - 2][j - 1] + 1; }
+        }
+      }
       if (i >= 2 && j >= 2) {
         const s1 = tokenSim(query[i - 1], line.tokens[j - 2]);
         const s2 = tokenSim(query[i - 2], line.tokens[j - 1]);

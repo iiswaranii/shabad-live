@@ -20,9 +20,13 @@ import { primeMeter, attachMeter, detachMeter, meterConflictSuspected } from './
 import { levelBus } from './src/level';
 import { PracticeAdapter, TypedAdapter, type Scenario } from './src/practice';
 import { fetchManifest, loadCorpus, type PackInfo } from './src/corpusLoader';
+import { KirtanModelAdapter, kirtanModelSupported, onModelStatus, checkKirtanServer, type ModelStatus } from './src/kirtanModel';
+import { startVocalCapture, type VocalCapture } from './src/vocal';
 
-interface Settings { lang: Lang; scale: number; asrLang: 'pa-IN' | 'hi-IN'; sources: number[]; showHeard: boolean; consented: boolean }
-const DEFAULTS: Settings = { lang: 'en', scale: 1, asrLang: 'pa-IN', sources: [1, 3, 5], showHeard: false, consented: false };
+/** 'kirtan' = kirtan model on a server (recommended for singing); 'kirtan-device' = in the browser (experimental, slow). */
+type Engine = 'phone' | 'kirtan' | 'kirtan-device';
+interface Settings { lang: Lang; scale: number; asrLang: 'pa-IN' | 'hi-IN'; sources: number[]; showHeard: boolean; consented: boolean; engine: Engine; vocalFocus: boolean; serverUrl: string }
+const DEFAULTS: Settings = { lang: 'en', scale: 1, asrLang: 'pa-IN', sources: [1, 3, 5], showHeard: false, consented: false, engine: 'phone', vocalFocus: true, serverUrl: '' };
 const KEY = 'shabad-live/settings@1';
 
 type Mode = { kind: 'mic' } | { kind: 'practice'; scenario: Scenario } | { kind: 'typed' };
@@ -53,6 +57,10 @@ function Main() {
   const [showSettings, setShowSettings] = useState(false);
   const [typed, setTyped] = useState('');
   const pendingKeep = useRef<string | undefined>(undefined);
+  const vocalRef = useRef<VocalCapture | null>(null);
+  const [model, setModel] = useState<ModelStatus>({ phase: 'idle' });
+  const [chunkMs, setChunkMs] = useState<number | null>(null);
+  useEffect(() => onModelStatus(setModel), []);
 
   useEffect(() => {
     AsyncStorage.getItem(KEY).then((v) => { if (v) setSettings({ ...DEFAULTS, ...JSON.parse(v) }); }).catch(() => {}).finally(() => setSettingsLoaded(true));
@@ -82,7 +90,7 @@ function Main() {
     return () => { cancelled = true; };
   }, [settingsLoaded, sourcesKey, loadKey]);
 
-  const stop = useCallback(() => { ctl.current?.stop(); detachMeter(); }, []);
+  const stop = useCallback(() => { ctl.current?.stop(); detachMeter(); vocalRef.current?.stop(); vocalRef.current = null; }, []);
 
   // Capture stops when the app is backgrounded or the page is hidden or closed.
   useEffect(() => {
@@ -110,16 +118,29 @@ function Main() {
     if (!corpus) return;
     ctl.current?.stop();
     detachMeter();
+    vocalRef.current?.stop(); vocalRef.current = null;
     setNotice(null);
     let adapter: RecognitionAdapter;
+    let vocalFirst = false;
     if (m.kind === 'practice') adapter = new PracticeAdapter(corpus, m.scenario);
     else if (m.kind === 'typed') adapter = new TypedAdapter();
-    else {
+    else if (settings.engine === 'kirtan' && kirtanModelSupported()) {
+      if (!settings.serverUrl.trim()) { setNotice('needs_server'); return; }
+      const ka = new KirtanModelAdapter({ kind: 'server', url: settings.serverUrl.trim() }); // captures vocal-filtered audio itself
+      ka.onTiming = setChunkMs;
+      adapter = ka;
+    } else if (settings.engine === 'kirtan-device' && kirtanModelSupported()) {
+      const ka = new KirtanModelAdapter({ kind: 'device' });
+      ka.onTiming = setChunkMs;
+      adapter = ka;
+    } else {
       const sup = speechSupport();
       if (sup !== 'available') { setNotice(sup === 'needs_build' ? 'needs_build' : 'speech_unavailable'); return; }
       const sa = new SpeechAdapter(settings.asrLang);
-      primeMeter();
-      sa.onAudioStart = () => { attachMeter(); };
+      // Chrome (not iPhone Safari, which must start inside the tap) can recognise a
+      // vocal-filtered track instead of the raw microphone.
+      vocalFirst = Platform.OS === 'web' && settings.vocalFocus && !isIOS() && kirtanModelSupported();
+      if (!vocalFirst) { primeMeter(); sa.onAudioStart = () => { attachMeter(); }; }
       adapter = sa;
     }
     levelBus.reset();
@@ -138,7 +159,13 @@ function Main() {
         if (code === 'needs_tap') feedback('warning');
       }
     });
-    c.start().then(() => { if (keepShabad && c.snapshot.phase === 'listening') c.select(keepShabad); });
+    const go = () => c.start().then(() => { if (keepShabad && c.snapshot.phase === 'listening') c.select(keepShabad); });
+    if (vocalFirst) {
+      startVocalCapture()
+        .then((cap) => { if (ctl.current !== c) { cap.stop(); return; } vocalRef.current = cap; (adapter as SpeechAdapter).track = cap.track; })
+        .catch(() => { /* filtering unavailable: recognise the raw microphone */ })
+        .finally(() => { if (ctl.current === c) go(); });
+    } else go();
   };
 
   const listen = (keep?: string) => {
@@ -222,6 +249,13 @@ function Main() {
             ))}
             <Row t={t} icon="keyboard" iconBg="#8E8E93" title={s.typeHeard} subtitle={s.typeHeardSub} chevron disabled={!corpus} onPress={() => begin({ kind: 'typed' })} />
           </Group>
+          {kirtanModelSupported() && (
+            <Group t={t} footer={settings.engine === 'kirtan' ? (settings.serverUrl ? `${s.engineServerSub}${chunkMs ? ` · ${s.chunkTiming(chunkMs)}` : ''}` : s.kirtanNeedsServer) : settings.engine === 'kirtan-device' ? s.engineDeviceExpSub : s.kirtanHomeSub}>
+              <Row t={t} icon="music" iconBg="#AF52DE" title={s.kirtanHome}
+                right={<Switch value={settings.engine !== 'phone'} onValueChange={(v) => { update({ engine: v ? 'kirtan' : 'phone' }); if (v && !settings.serverUrl) setShowSettings(true); }} accessibilityLabel={s.kirtanHome}
+                  trackColor={{ true: '#34C759', false: t.fill }} thumbColor="#FFFFFF" {...({ activeThumbColor: '#FFFFFF' } as object)} />} />
+            </Group>
+          )}
           <Group t={t}>
             <Row t={t} icon="question" iconBg="#007AFF" title={s.micHelp} chevron onPress={() => setNotice('help')} />
           </Group>
@@ -250,12 +284,18 @@ function Main() {
         </View>
       </Glass>
 
-      {notice && <NoticeFor code={notice} t={t} s={s} asr={settings.asrLang}
+      {notice && <NoticeFor code={notice} t={t} s={s} asr={settings.asrLang} onSettings={() => { setNotice(null); setShowSettings(true); }}
         onDismiss={() => setNotice(null)} onResume={resume}
         onHindi={() => { update({ asrLang: 'hi-IN' }); setNotice(null); }}
         onRetry={() => { setNotice(null); listen(openShabad()); }} />}
 
-      {mode?.kind === 'typed' && listening && (
+      {(model.phase === 'downloading' || model.phase === 'loading') && settings.engine === 'kirtan-device' && (
+        <Notice t={t} tone="info" title={model.phase === 'downloading' ? s.modelDownloading(model.progress) : s.modelLoading} body={s.modelDownloadingSub} />
+      )}
+      {model.phase === 'error' && settings.engine === 'kirtan-device' && (
+        <Notice t={t} title={s.modelErrorTitle} body={s.engineKirtanSub} code={`${s.errCode}: ${model.message.slice(0, 120)}`} />
+      )}
+            {mode?.kind === 'typed' && listening && (
         <FadeIn style={[st.typed, { backgroundColor: t.card }]} from={-8}>
           <Icon name="keyboard" size={20} color={t.label2} />
           <TextInput
@@ -305,7 +345,7 @@ function Main() {
         </Glass>
       </Rise>
 
-      <ConsentSheet visible={showConsent} t={t} s={s}
+      <ConsentSheet visible={showConsent} t={t} s={s} engine={kirtanModelSupported() ? settings.engine : 'phone'}
         onClose={() => setShowConsent(false)}
         onAllow={() => { update({ consented: true }); setShowConsent(false); begin({ kind: 'mic' }, pendingKeep.current); }} />
 
@@ -316,8 +356,8 @@ function Main() {
 
 // ------------------------------------------------------------------ notices
 
-function NoticeFor({ code, t, s, asr, onDismiss, onResume, onHindi, onRetry }: {
-  code: string; t: Theme; s: Strings; asr: string; onDismiss: () => void; onResume: () => void; onHindi: () => void; onRetry: () => void;
+function NoticeFor({ code, t, s, asr, onDismiss, onResume, onHindi, onRetry, onSettings }: {
+  code: string; t: Theme; s: Strings; asr: string; onDismiss: () => void; onResume: () => void; onHindi: () => void; onRetry: () => void; onSettings: () => void;
 }) {
   const standaloneNote = isIOS() && isStandalone() ? ` ${s.openInSafari}` : '';
   const hindi = asr !== 'hi-IN' ? [{ label: s.useHindi, onPress: onHindi }] : [];
@@ -333,6 +373,9 @@ function NoticeFor({ code, t, s, asr, onDismiss, onResume, onHindi, onRetry }: {
     case 'network': return show(s.networkTitle, s.networkBody);
     case 'speech_unavailable': return show(s.genericTitle, s.speechUnavailable, [], 'info');
     case 'needs_build': return show(s.genericTitle, s.nativeNeedsBuild, [], 'info');
+    case 'needs_server': return show(s.serverUrl, s.kirtanNeedsServer, [{ label: s.openSettings, onPress: onSettings, primary: true }], 'info', false);
+    case 'server_unreachable': return show(s.serverUnreachableTitle, s.serverUnreachableBody, [{ label: s.openSettings, onPress: onSettings }, { label: s.retry, onPress: onRetry, primary: true }]);
+    case 'server_no_model': return show(s.serverUnreachableTitle, s.serverNoModel, [{ label: s.openSettings, onPress: onSettings }, { label: s.retry, onPress: onRetry, primary: true }]);
     default: return show(s.genericTitle, s.micHelpBody, [{ label: s.retry, onPress: onRetry, primary: true }]);
   }
 }
@@ -361,7 +404,9 @@ function Sheet({ visible, onClose, children, t }: { visible: boolean; onClose: (
   );
 }
 
-function ConsentSheet({ visible, t, s, onClose, onAllow }: { visible: boolean; t: Theme; s: Strings; onClose: () => void; onAllow: () => void }) {
+function ConsentSheet({ visible, t, s, engine, onClose, onAllow }: { visible: boolean; t: Theme; s: Strings; engine: Engine; onClose: () => void; onAllow: () => void }) {
+  const points = engine === 'kirtan' ? [s.consentPoints[0], s.consentServer, s.consentPoints[2]]
+    : engine === 'kirtan-device' ? [s.consentPoints[0], s.consentKirtan, s.consentPoints[2]] : s.consentPoints;
   return (
     <Sheet visible={visible} onClose={onClose} t={t}>
       <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 10 }}>
@@ -369,7 +414,7 @@ function ConsentSheet({ visible, t, s, onClose, onAllow }: { visible: boolean; t
           <View style={[st.bigIcon, { backgroundColor: t.tintFill }]}><Icon name="mic.fill" size={34} color="#FFFFFF" /></View>
           <Text style={[TYPE.title2, { color: t.label, marginTop: 14, textAlign: 'center' }]}>{s.consentTitle}</Text>
         </View>
-        {s.consentPoints.map((p, i) => (
+        {points.map((p, i) => (
           <FadeIn key={p.title} delay={visible ? 120 + i * 70 : 0}>
             <View style={{ flexDirection: 'row', marginTop: 20, gap: 14 }}>
               <Icon name={p.icon} size={26} color={t.tint} />
@@ -415,6 +460,17 @@ function SettingsSheet({ visible, t, s, settings, packs, update, onClose }: {
             </ScalePress>
           </View>
         </Group>
+        <Group t={t} header={s.engine} footer={kirtanModelSupported() ? undefined : s.engineKirtanUnsupported}>
+          <Row t={t} title={s.enginePhone} subtitle={s.enginePhoneSub} check={settings.engine === 'phone'} onPress={() => update({ engine: 'phone' })} />
+          <Row t={t} title={s.engineServer} subtitle={s.engineServerSub} check={settings.engine === 'kirtan'} disabled={!kirtanModelSupported()} onPress={() => update({ engine: 'kirtan' })} />
+          <Row t={t} title={s.engineDeviceExp} subtitle={s.engineDeviceExpSub} check={settings.engine === 'kirtan-device'} disabled={!kirtanModelSupported()} onPress={() => update({ engine: 'kirtan-device' })} />
+        </Group>
+        {settings.engine === 'kirtan' && <ServerField t={t} s={s} value={settings.serverUrl} onChange={(v) => update({ serverUrl: v })} />}
+        <Group t={t} footer={s.vocalFocusSub}>
+          <Row t={t} icon="waveform" iconBg="#34C759" title={s.vocalFocus}
+            right={<Switch value={settings.vocalFocus} onValueChange={(v) => update({ vocalFocus: v })} accessibilityLabel={s.vocalFocus}
+              trackColor={{ true: '#34C759', false: t.fill }} thumbColor="#FFFFFF" {...({ activeThumbColor: '#FFFFFF' } as object)} />} />
+        </Group>
         <Group t={t} header={s.recognition}>
           <Row t={t} title={s.recognitionPa} subtitle={s.recognitionPaSub} check={settings.asrLang === 'pa-IN'} onPress={() => update({ asrLang: 'pa-IN' })} />
           <Row t={t} title={s.recognitionHi} subtitle={s.recognitionHiSub} check={settings.asrLang === 'hi-IN'} onPress={() => update({ asrLang: 'hi-IN' })} />
@@ -437,6 +493,30 @@ function SettingsSheet({ visible, t, s, settings, packs, update, onClose }: {
         <Group t={t} header={s.about} footer={s.aboutBody}><Row t={t} icon="info" iconBg="#8E8E93" title="Shabad OS Database 4.8.7" /></Group>
       </ScrollView>
     </Sheet>
+  );
+}
+
+function ServerField({ t, s, value, onChange }: { t: Theme; s: Strings; value: string; onChange: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [state, setState] = useState<'idle' | 'checking' | 'ok' | 'no_model' | 'unreachable'>('idle');
+  const test = async () => {
+    const url = draft.trim().replace(/\/+$/, '');
+    onChange(url);
+    setState('checking');
+    setState(await checkKirtanServer(url));
+  };
+  const msg = state === 'ok' ? s.serverOk : state === 'no_model' ? s.serverNoModel : state === 'unreachable' ? s.serverUnreachable : '';
+  return (
+    <Group t={t} header={s.serverUrl} footer={msg || undefined}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 16, paddingRight: 8, gap: 8, minHeight: 50 }}>
+        <TextInput value={draft} onChangeText={setDraft} onBlur={() => onChange(draft.trim().replace(/\/+$/, ''))} placeholder={s.serverUrlPlaceholder} placeholderTextColor={t.label3}
+          autoCapitalize="none" autoCorrect={false} keyboardType="url" accessibilityLabel={s.serverUrl}
+          style={[TYPE.body, { flex: 1, color: t.label, height: 44 }]} />
+        <Pressable onPress={test} accessibilityRole="button" accessibilityLabel={s.serverTest} style={{ paddingHorizontal: 12, height: 34, borderRadius: 17, backgroundColor: t.tintSoft, alignItems: 'center', justifyContent: 'center' }}>
+          {state === 'checking' ? <ActivityIndicator size="small" color={t.tint} /> : <Text style={[TYPE.subhead, { color: t.tint, fontWeight: '600' }]}>{s.serverTest}</Text>}
+        </Pressable>
+      </View>
+    </Group>
   );
 }
 

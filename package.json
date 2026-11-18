@@ -17,7 +17,8 @@
     "test": "node --import tsx --test packages/core/test/*.test.ts services/api/test/*.test.ts",
     "typecheck": "tsc -p packages/core && tsc -p tools/cli && tsc -p services/api",
     "web:build": "npm run -w apps/mobile export:web",
-    "web:deploy": "bash scripts/deploy-pages.sh"
+    "web:deploy": "bash scripts/deploy-pages.sh",
+    "kirtan-server": "KIRTAN_MODEL_DIR=models-dist tsx services/api/src/server.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

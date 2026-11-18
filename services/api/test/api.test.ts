@@ -20,7 +20,7 @@ test('API: session flow, stale windows rejected, shabad text, audio not accepted
     assert.equal(r.selectedBy, 'user');
     const sh = await (await fetch(`${base}/shabads/QNL`)).json();
     assert.ok(sh.lines.length > 3 && sh.source.page === 44);
-    assert.equal((await post(`/sessions/${sessionId}/audio`)).status, 501);
+    assert.equal((await post('/transcribe')).status, 503, 'no kirtan model loaded in this test');
     assert.equal((await fetch(`${base}/sessions/${sessionId}`, { method: 'DELETE' })).status, 204);
     assert.equal((await post(`/sessions/${sessionId}/clear`)).status, 404);
   } finally {

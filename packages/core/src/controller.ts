@@ -71,7 +71,9 @@ export class ListenController {
 
   constructor(private adapter: RecognitionAdapter, private engine: EngineClient, opts: ControllerOptions = {}) {
     this.o = {
-      windowSec: 6, hopSec: 1.5, maxWords: 14,
+      // Long enough for slow sung kirtan (see SUNG_WINDOWS in simulate.ts and docs/EVALUATION.md);
+      // line tracking itself uses only the most recent words.
+      windowSec: 24, hopSec: 1.5, maxWords: 16,
       now: () => Date.now() / 1000,
       setInterval: (fn, ms) => setInterval(fn, ms),
       clearInterval: (h) => clearInterval(h as ReturnType<typeof setInterval>),

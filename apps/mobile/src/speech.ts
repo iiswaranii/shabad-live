@@ -28,6 +28,8 @@ export class SpeechAdapter implements RecognitionAdapter {
   private subs: { remove(): void }[] = [];
   private handlers: Parameters<RecognitionAdapter['start']>[0] | null = null;
   onAudioStart: (() => void) | null = null;
+  /** Web-only (filtered track input); unused on native. */
+  track: unknown = null;
 
   constructor(private lang: string) {}
 

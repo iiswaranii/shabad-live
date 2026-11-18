@@ -20,6 +20,14 @@ export interface Profile {
   sustain: number;
   wordSec: [number, number];
   script: 'gurmukhi' | 'devanagari';
+  /** Probability of a mis-heard unrelated word (sung audio often comes back as other words). */
+  junk?: number;
+  /** Probability a word comes back split in two or merged with the next. */
+  split?: number;
+  /** Probability the singer repeats the first half of a line before finishing it (common in kirtan). */
+  halfRepeat?: number;
+  /** Probability of an alaap / vocable passage between lines ("ਆ", "ਹੋ", held vowels). */
+  alaap?: number;
 }
 
 export const PROFILES: Record<string, Profile> = {
@@ -27,7 +35,17 @@ export const PROFILES: Record<string, Profile> = {
   unseen_raagi: { name: 'unseen_raagi', wordDrop: 0.15, windowDrop: 0.1, spellNoise: 0.4, filler: 0.08, sustain: 0.25, wordSec: [0.6, 1.3], script: 'gurmukhi' },
   hindi_asr: { name: 'hindi_asr', wordDrop: 0.15, windowDrop: 0.1, spellNoise: 0.3, filler: 0.05, sustain: 0.2, wordSec: [0.5, 1.1], script: 'devanagari' },
   distant_phone: { name: 'distant_phone', wordDrop: 0.35, windowDrop: 0.15, spellNoise: 0.45, filler: 0.12, sustain: 0.3, wordSec: [0.6, 1.2], script: 'gurmukhi' },
+  // Sung kirtan heard by a general speech recogniser (browser / phone): slow, melismatic singing
+  // with harmonium and tabla. Most words are lost or mangled; unrelated words come back instead.
+  sung_browser: { name: 'sung_browser', wordDrop: 0.5, windowDrop: 0.15, spellNoise: 0.6, filler: 0.15, sustain: 0.6, wordSec: [1.2, 2.6], script: 'gurmukhi', junk: 0.25, split: 0.15, halfRepeat: 0.5, alaap: 0.4 },
+  // Sung kirtan heard by a kirtan-trained model (reported character error rate ~28%).
+  sung_kirtan_model: { name: 'sung_kirtan_model', wordDrop: 0.15, windowDrop: 0.08, spellNoise: 0.55, filler: 0.08, sustain: 0.5, wordSec: [1.2, 2.6], script: 'gurmukhi', junk: 0.05, split: 0.12, halfRepeat: 0.5, alaap: 0.4 },
 };
+
+/** How recogniser output is cut into windows. Spoken defaults; sung kirtan needs longer windows. */
+export interface WindowConfig { windowSec: number; hopSec: number; maxWords: number }
+export const SPOKEN_WINDOWS: WindowConfig = { windowSec: 5, hopSec: 1.5, maxWords: 99 };
+export const SUNG_WINDOWS: WindowConfig = { windowSec: 24, hopSec: 2, maxWords: 16 };
 
 export type PlanStep = { lineId: string } | { instrumentalSec: number; audience?: boolean };
 
@@ -50,6 +68,9 @@ export function rng(seed: number) {
 }
 
 const FILLERS = ['ਜੀ', 'ਹਾਂ', 'ਓ', 'ਵਾਹਿਗੁਰੂ', 'ਬੋਲੋ', 'ਸਾਧ ਸੰਗਤ'];
+const VOCABLES = ['ਆ', 'ਆਆ', 'ਹੋ', 'ਹੋਓ', 'ਏ', 'ਹਾ', 'ਓ', 'ਆਂ'];
+// Ordinary Punjabi and English words a general recogniser substitutes for sung syllables.
+const JUNK = ['ਕਿਹਾ', 'ਪਾਣੀ', 'ਤਾਂ', 'ਵੀ', 'ਗੱਲ', 'ਲੋਕ', 'ਸਮਾਂ', 'ਕੰਮ', 'ਬਹੁਤ', 'ਅੱਜ', 'hello', 'money', 'honey', 'the', 'I', 'say'];
 const ASPIRATE: Record<string, string> = { 'ਕ': 'ਖ', 'ਖ': 'ਕ', 'ਗ': 'ਘ', 'ਘ': 'ਗ', 'ਤ': 'ਥ', 'ਥ': 'ਤ', 'ਦ': 'ਧ', 'ਧ': 'ਦ', 'ਪ': 'ਫ', 'ਬ': 'ਭ', 'ਭ': 'ਬ', 'ਟ': 'ਤ', 'ਡ': 'ਦ' };
 const VOWEL_SWAP: Record<string, string> = { 'ਿ': 'ੀ', 'ੀ': 'ਿ', 'ੁ': 'ੂ', 'ੂ': 'ੁ', 'ੇ': 'ੈ', 'ੈ': 'ੇ', 'ੋ': 'ੌ', 'ੌ': 'ੋ' };
 
@@ -69,7 +90,7 @@ function sustainWord(w: string): string {
   return /[ਾ]$/.test(w) ? w + 'ਆ' : /[ਿੀ]$/.test(w) ? w + 'ਈ' : w + 'ਏ';
 }
 
-export function simulate(corpus: Corpus, plan: PlanStep[], profile: Profile, seed: number): SimClip {
+export function simulate(corpus: Corpus, plan: PlanStep[], profile: Profile, seed: number, win: WindowConfig = SPOKEN_WINDOWS): SimClip {
   const r = rng(seed);
   const sung: { t0: number; t1: number; text: string }[] = [];
   const truth: TruthSegment[] = [];
@@ -85,25 +106,41 @@ export function simulate(corpus: Corpus, plan: PlanStep[], profile: Profile, see
     const line = corpus.lineById.get(step.lineId);
     if (!line) throw new Error(`unknown line ${step.lineId}`);
     const start = t;
-    for (const w of words(line.text)) {
+    const ws = words(line.text);
+    // Kirtan often repeats the first half of a line before completing it.
+    const sungWords = profile.halfRepeat && r() < profile.halfRepeat && ws.length >= 4
+      ? [...ws.slice(0, Math.ceil(ws.length / 2)), ...ws]
+      : ws;
+    for (const w of sungWords) {
       const sustained = r() < profile.sustain;
       const d = profile.wordSec[0] + r() * (profile.wordSec[1] - profile.wordSec[0]) + (sustained ? 1.2 : 0);
-      if (r() >= profile.wordDrop) {
+      if (profile.junk && r() < profile.junk) {
+        sung.push({ t0: t, t1: t + d, text: JUNK[Math.floor(r() * JUNK.length)] });
+      } else if (r() >= profile.wordDrop) {
         let out = r() < profile.spellNoise ? misspell(w, r) : w;
         if (sustained) out = sustainWord(out);
-        sung.push({ t0: t, t1: t + d, text: out });
+        if (profile.split && r() < profile.split && Array.from(out).length >= 4) {
+          const cs = Array.from(out); const k = Math.floor(cs.length / 2);
+          sung.push({ t0: t, t1: t + d / 2, text: cs.slice(0, k).join('') });
+          sung.push({ t0: t + d / 2, t1: t + d, text: cs.slice(k).join('') });
+        } else {
+          sung.push({ t0: t, t1: t + d, text: out });
+        }
       }
       t += d;
       if (r() < profile.filler) sung.push({ t0: t, t1: t + 0.3, text: FILLERS[Math.floor(r() * FILLERS.length)] });
+    }
+    if (profile.alaap && r() < profile.alaap) {
+      const n = 1 + Math.floor(r() * 3);
+      for (let k = 0; k < n; k++) { t += 1.5; sung.push({ t0: t - 1.5, t1: t, text: VOCABLES[Math.floor(r() * VOCABLES.length)] }); }
     }
     t += 0.4;
     truth.push({ t0: start, t1: t, lineId: line.id });
   }
   const windows: SimWindow[] = [];
-  const WINDOW = 5, HOP = 1.5;
-  for (let end = HOP; end <= t + HOP; end += HOP) {
-    const t0 = Math.max(0, end - WINDOW);
-    const ws = sung.filter((s) => s.t1 > t0 && s.t1 <= end && r() >= profile.windowDrop).map((s) => s.text);
+  for (let end = win.hopSec; end <= t + win.hopSec; end += win.hopSec) {
+    const t0 = Math.max(0, end - win.windowSec);
+    const ws = sung.filter((s) => s.t1 > t0 && s.t1 <= end && r() >= profile.windowDrop).map((s) => s.text).slice(-win.maxWords);
     let text = ws.join(' ');
     if (profile.script === 'devanagari') text = gurmukhiToDevanagari(text);
     windows.push({ t0: round(t0), t1: round(end), text });
@@ -154,4 +191,19 @@ export function kirtanPlan(corpus: Corpus, shabadId: string, seed: number): Plan
 
 function round(x: number) {
   return Math.round(x * 100) / 100;
+}
+
+/**
+ * Cut timed recogniser words into overlapping windows: the last `maxWords` words heard within
+ * `windowSec`, every `hopSec`. The app's ListenController uses the same rule.
+ */
+export function windowsFromWords(ws: { t: number; text: string }[], cfg: WindowConfig): SimWindow[] {
+  const end = ws.length ? ws[ws.length - 1].t + cfg.hopSec * 3 : 0;
+  const out: SimWindow[] = [];
+  for (let t1 = cfg.hopSec; t1 <= end; t1 += cfg.hopSec) {
+    const t0 = Math.max(0, t1 - cfg.windowSec);
+    const text = ws.filter((w) => w.t > t0 && w.t <= t1).slice(-cfg.maxWords).map((w) => w.text).join(' ');
+    out.push({ t0: round(t0), t1: round(t1), text });
+  }
+  return out;
 }

@@ -1,0 +1,127 @@
+{
+  "format": "shabad-live-clips@1",
+  "synthetic": true,
+  "note": "SYNTHETIC FIXTURES. Simulated recogniser windows for software testing and threshold tuning. They do not measure real-world recognition accuracy.",
+  "clips": [
+    {
+      "file": "clips/MRB-A.json"
+    },
+    {
+      "file": "clips/MRB-B.json"
+    },
+    {
+      "file": "clips/MRB-C.json"
+    },
+    {
+      "file": "clips/MRB-D.json"
+    },
+    {
+      "file": "clips/QNL-A.json"
+    },
+    {
+      "file": "clips/QNL-B.json"
+    },
+    {
+      "file": "clips/QNL-C.json"
+    },
+    {
+      "file": "clips/QNL-D.json"
+    },
+    {
+      "file": "clips/5BC-A.json"
+    },
+    {
+      "file": "clips/5BC-B.json"
+    },
+    {
+      "file": "clips/5BC-C.json"
+    },
+    {
+      "file": "clips/5BC-D.json"
+    },
+    {
+      "file": "clips/2GS-A.json"
+    },
+    {
+      "file": "clips/2GS-B.json"
+    },
+    {
+      "file": "clips/2GS-C.json"
+    },
+    {
+      "file": "clips/2GS-D.json"
+    },
+    {
+      "file": "clips/KF2-A.json"
+    },
+    {
+      "file": "clips/KF2-B.json"
+    },
+    {
+      "file": "clips/KF2-C.json"
+    },
+    {
+      "file": "clips/KF2-D.json"
+    },
+    {
+      "file": "clips/NK7-A.json"
+    },
+    {
+      "file": "clips/NK7-B.json"
+    },
+    {
+      "file": "clips/NK7-C.json"
+    },
+    {
+      "file": "clips/NK7-D.json"
+    },
+    {
+      "file": "clips/BGL-A.json"
+    },
+    {
+      "file": "clips/BGL-B.json"
+    },
+    {
+      "file": "clips/BGL-C.json"
+    },
+    {
+      "file": "clips/BGL-D.json"
+    },
+    {
+      "file": "clips/3MP-A.json"
+    },
+    {
+      "file": "clips/3MP-B.json"
+    },
+    {
+      "file": "clips/3MP-C.json"
+    },
+    {
+      "file": "clips/3MP-D.json"
+    },
+    {
+      "file": "clips/6U1-A.json"
+    },
+    {
+      "file": "clips/6U1-B.json"
+    },
+    {
+      "file": "clips/6U1-C.json"
+    },
+    {
+      "file": "clips/6U1-D.json"
+    },
+    {
+      "file": "clips/1SS-A.json"
+    },
+    {
+      "file": "clips/1SS-B.json"
+    },
+    {
+      "file": "clips/1SS-C.json"
+    },
+    {
+      "file": "clips/1SS-D.json"
+    }
+  ]
+}

@@ -8,8 +8,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import {
-  Corpus, RecognitionSession, simulate, kirtanPlan, structure, PROFILES, rng,
-  type CorpusPack, type EngineResponse, type SimWindow, type TruthSegment, type PlanStep,
+  Corpus, RecognitionSession, simulate, kirtanPlan, structure, PROFILES, rng, windowsFromWords, SPOKEN_WINDOWS, SUNG_WINDOWS,
+  type CorpusPack, type EngineResponse, type SimWindow, type TruthSegment, type PlanStep, type WindowConfig,
 } from '@shabad/core';
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -37,6 +37,8 @@ interface Clip {
   performance: { id: string; profile?: string; note?: string };
   /** Either recogniser windows, or an audio file that needs an ASR adapter. */
   windows?: SimWindow[];
+  /** Timed recogniser words; when present the evaluator cuts its own windows (see --windows). */
+  words?: { t: number; text: string }[];
   audio?: string;
   truth: TruthSegment[];
 }
@@ -49,7 +51,7 @@ function loadClips(path: string): Clip[] {
 
 // ------------------------------------------------------------------ synth
 
-function synth(c: Corpus, out: string) {
+function synth(c: Corpus, out: string, set: 'spoken' | 'sung') {
   mkdirSync(join(out, 'clips'), { recursive: true });
   const r = rng(20261118);
   // Shabads that share a pangti with another shabad (both members of each pair are included).
@@ -65,17 +67,24 @@ function synth(c: Corpus, out: string) {
     const s = pool[Math.floor(r() * pool.length)].id;
     if (!chosen.includes(s)) chosen.push(s);
   }
-  const performances = [
-    { id: 'A', profile: 'clear_close', split: 'tune' as const },
-    { id: 'B', profile: 'unseen_raagi', split: 'eval' as const },
-    { id: 'C', profile: 'distant_phone', split: 'eval' as const },
-    { id: 'D', profile: 'hindi_asr', split: 'eval' as const },
-  ];
+  const performances = set === 'sung'
+    ? [
+      { id: 'A', profile: 'sung_browser', split: 'tune' as const },
+      { id: 'B', profile: 'sung_browser', split: 'eval' as const },
+      { id: 'C', profile: 'sung_kirtan_model', split: 'tune' as const },
+      { id: 'D', profile: 'sung_kirtan_model', split: 'eval' as const },
+    ]
+    : [
+      { id: 'A', profile: 'clear_close', split: 'tune' as const },
+      { id: 'B', profile: 'unseen_raagi', split: 'eval' as const },
+      { id: 'C', profile: 'distant_phone', split: 'eval' as const },
+      { id: 'D', profile: 'hindi_asr', split: 'eval' as const },
+    ];
   const entries: { file: string }[] = [];
   chosen.forEach((shabadId, si) => {
     performances.forEach((p, pi) => {
       // Each performance has its own plan: different starting verse, repeats, skips.
-      const seed = 1000 + si * 10 + pi;
+      const seed = (set === 'sung' ? 5000 : 1000) + si * 10 + pi;
       let plan: PlanStep[] = kirtanPlan(c, shabadId, seed);
       const { rahao } = structure(c, shabadId);
       if (rahao[0] && (sharedPairs.flat().includes(shabadId) || r() < 0.4)) {
@@ -86,7 +95,7 @@ function synth(c: Corpus, out: string) {
       const clip: Clip = {
         id: `${shabadId}-${p.id}`, shabadId, split: p.split, synthetic: true,
         performance: { id: p.id, profile: p.profile, note: 'SYNTHETIC recogniser output generated from verified corpus text; not audio' },
-        windows: sim.windows, truth: sim.truth,
+        ...(set === 'sung' ? { words: sim.words } : { windows: sim.windows, words: sim.words }), truth: sim.truth,
       };
       const file = `clips/${clip.id}.json`;
       writeFileSync(join(out, file), JSON.stringify(clip));
@@ -106,7 +115,11 @@ function synth(c: Corpus, out: string) {
 
 interface Run { clip: Clip; responses: EngineResponse[] }
 
+let windowCfg: WindowConfig | null = null;
+
 function run(c: Corpus, clip: Clip): Run | null {
+  // Clips with timed words are re-windowed with --windows (default: stored windows, else sung windows).
+  if (clip.words && (windowCfg || !clip.windows)) clip.windows = windowsFromWords(clip.words, windowCfg ?? SUNG_WINDOWS);
   if (!clip.windows) {
     console.error(`skip ${clip.id}: audio input needs an ASR adapter (none configured). Provide recogniser windows; see docs/INPUT_FORMATS.md.`);
     return null;
@@ -253,20 +266,22 @@ function summarise(ms: ClipMetrics[]) {
 function evalCmd(c: Corpus, clips: Clip[], split: string, reportPath?: string) {
   const runs = clips.map((k) => run(c, k)).filter((x): x is Run => !!x);
   const metrics = runs.map((r) => evaluate(c, r));
+  const profiles = [...new Set(metrics.map((m) => m.profile))];
   const groups: Record<string, ClipMetrics[]> = {
-    'tune (A: clear_close)': metrics.filter((m) => m.split === 'tune'),
+    ...Object.fromEntries(profiles.filter((p) => metrics.some((m) => m.split === 'tune' && m.profile === p)).map((p) => [`tune — ${p}`, metrics.filter((m) => m.split === 'tune' && m.profile === p)])),
     'eval — all held-out': metrics.filter((m) => m.split === 'eval'),
-    ...Object.fromEntries(['unseen_raagi', 'distant_phone', 'hindi_asr'].map((p) => [`eval — ${p}`, metrics.filter((m) => m.split === 'eval' && m.profile === p)])),
+    ...Object.fromEntries(profiles.map((p) => [`eval — ${p}`, metrics.filter((m) => m.split === 'eval' && m.profile === p)]).filter(([, v]) => (v as ClipMetrics[]).length)),
   };
   const selected = split === 'all' ? groups : Object.fromEntries(Object.entries(groups).filter(([k]) => k.startsWith(split)));
   const table = Object.fromEntries(Object.entries(selected).map(([k, v]) => [k, summarise(v)]));
   console.table(table);
   const failures = metrics.filter((m) => !m.firstAutoCorrect || m.wrongAutoOpens).map((m) => `${m.id}: opened ${m.autoOpened ?? 'nothing'}${m.wrongAutoOpens ? `, ${m.wrongAutoOpens} wrong auto-open(s)` : ''}`);
   if (failures.length) console.log('clips not correctly auto-opened:\n  ' + failures.join('\n  '));
-  if (reportPath) writeReport(reportPath, table, failures, metrics);
+  if (reportPath) writeReport(reportPath, table, failures, metrics, clipsPathForReport);
 }
 
-function writeReport(path: string, table: Record<string, ReturnType<typeof summarise>>, failures: string[], metrics: ClipMetrics[]) {
+let clipsPathForReport = '';
+function writeReport(path: string, table: Record<string, ReturnType<typeof summarise>>, failures: string[], metrics: ClipMetrics[], clipsPath: string) {
   const keys = Object.keys(Object.values(table)[0]) as (keyof ReturnType<typeof summarise>)[];
   const cols = Object.keys(table);
   const md = [
@@ -286,7 +301,7 @@ function writeReport(path: string, table: Record<string, ReturnType<typeof summa
     ...keys.map((k) => `| ${k} | ${cols.map((c) => String(table[c][k])).join(' | ')} |`),
     '',
     'Corpus searched: Sri Guru Granth Sahib Ji + Vaaran Bhai Gurdas Ji + Ghazals Bhai Nand Lal Ji (full packs).',
-    `Clips: ${metrics.length} (10 shabads × 4 simulated performances; performance A = tuning, B–D held out).`,
+    `Clips: ${metrics.length} (10 shabads × 4 simulated performances). Groups starting "tune" were used to set thresholds; "eval" groups were held out. Windows: ${windowCfg ? JSON.stringify(windowCfg) : 'as stored in the clips'}.`,
     '',
     failures.length ? '### Clips not correctly auto-opened\n\n' + failures.map((f) => `- ${f}`).join('\n') : '',
     '',
@@ -315,7 +330,7 @@ function writeReport(path: string, table: Record<string, ReturnType<typeof summa
     '- **highlightDelay**: seconds from the start of a sung line to the live marker showing it; lines never shown are counted separately.',
   ];
   writeFileSync(path, md.join('\n') + '\n');
-  writeFileSync(join(dirname(path), '../fixtures/synthetic/eval_results.json'), JSON.stringify({ table, metrics }, null, 2));
+  writeFileSync(join(dirname(clipsPath), 'eval_results.json'), JSON.stringify({ table, metrics }, null, 2));
   console.log(`report: ${path}`);
 }
 
@@ -323,12 +338,15 @@ function writeReport(path: string, table: Record<string, ReturnType<typeof summa
 
 const corpusDir = resolve(args.corpus ?? 'corpus');
 if (cmd === 'synth') {
-  synth(loadCorpus(corpusDir, args.sources), resolve(args.out ?? 'fixtures/synthetic'));
+  const set = args.set === 'sung' ? 'sung' : 'spoken';
+  synth(loadCorpus(corpusDir, args.sources), resolve(args.out ?? (set === 'sung' ? 'fixtures/synthetic-sung' : 'fixtures/synthetic')), set);
 } else if (cmd === 'recognize' || cmd === 'eval') {
   const clipsPath = resolve(args.clips ?? 'fixtures/synthetic/manifest.json');
   if (!existsSync(clipsPath)) { console.error(`no clip manifest at ${clipsPath}; run \`npm run synth\` first`); process.exit(2); }
   let clips = loadClips(clipsPath);
+  clipsPathForReport = clipsPath;
   if (args.clip) clips = clips.filter((k) => k.id === args.clip);
+  if (args.windows) windowCfg = args.windows === 'spoken' ? SPOKEN_WINDOWS : SUNG_WINDOWS;
   const c = loadCorpus(corpusDir, args.sources);
   if (cmd === 'recognize') recognize(c, clips, args.json === 'true');
   else evalCmd(c, clips, args.split ?? 'all', args.report);

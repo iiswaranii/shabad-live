@@ -180,3 +180,31 @@ export function gurmukhiToDevanagari(text: string): string {
   }
   return out.normalize('NFC');
 }
+
+/**
+ * Tokens for recogniser output (not for corpus text). Sung kirtan comes back with alaap
+ * vocables, held repeats and stray words in other scripts; those carry no evidence.
+ */
+export function queryTokens(text: string): Token[] {
+  const ws = words(text);
+  const scripts = ws.map((w) => detectScript(w));
+  const indic = scripts.filter((x) => x === 'gurmukhi' || x === 'devanagari').length;
+  let toks = ws
+    // A mostly-Gurmukhi transcript with a few Latin words: the Latin words are mis-hearings.
+    .filter((_, i) => !(scripts[i] === 'latin' && indic >= ws.length * 0.6))
+    .map((w) => ({ skel: skeleton(w), loose: loose(w) }))
+    // Vocables: pure vowels / a bare "ਹ" sound (ਆ, ਓ, ਹੋ, ਹਾਂ).
+    .filter((t) => t.skel.length > 0 && !VOCABLE_SKELETONS.has(t.skel));
+  // Held repeats: keep at most two of the same word in a row (Gurbani has ਹਰਿ ਹਰਿ).
+  toks = toks.filter((t, i) => !(i >= 2 && toks[i - 1].skel === t.skel && toks[i - 2].skel === t.skel));
+  return toks;
+}
+const VOCABLE_SKELETONS = new Set(['A', 'AN', 'H', 'AH', 'HN']);
+
+/** Join two recogniser tokens that may be one sung word split in two (ਪ੍ਰ + ਭੂ). */
+export function joinTokens(a: Token, b: Token): Token {
+  const tail = b.skel.startsWith('A') ? b.skel.slice(1) : b.skel;
+  let skel = '';
+  for (const ch of a.skel + tail) if (skel[skel.length - 1] !== ch) skel += ch;
+  return { skel, loose: a.loose !== null && b.loose !== null ? a.loose + b.loose : null };
+}

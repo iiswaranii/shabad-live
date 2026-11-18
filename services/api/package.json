@@ -1,5 +1,8 @@
 {
   "name": "@shabad/api",
   "private": true,
-  "dependencies": { "@shabad/core": "*" }
+  "dependencies": {
+    "@shabad/core": "*",
+    "@huggingface/transformers": "4.3.2"
+  }
 }

@@ -1,6 +1,6 @@
 import type { Corpus, Line } from './corpus';
 import { search, type LineHit } from './matcher';
-import { tokenize } from './normalize';
+import { queryTokens } from './normalize';
 import type { AudioWindow, Candidate, EngineResponse } from './types';
 
 /**
@@ -19,8 +19,18 @@ export const DEFAULT_PARAMS = {
   /** Auto-open needs this much support and this margin over the runner-up. */
   resolveMin: 10,
   resolveMargin: 5,
+  /**
+   * Auto-open also needs evidence from two different lines of the shabad, or one line heard
+   * very clearly. Noisy sung transcripts produce chance matches to single lines.
+   */
+  strongSingle: 18,
+  /** ...or one line heard almost completely (short distinctive lines). */
+  completeCoverage: 0.85,
+  completeMin: 12,
   /** Live tracking inside the selected shabad. */
   trackMin: 5,
+  /** Recent words used for line tracking. */
+  trackWords: 6,
   trackMargin: 2,
   /** Consecutive windows of strong evidence for a different shabad before an auto-opened shabad is replaced. */
   switchAfter: 3,
@@ -42,6 +52,8 @@ interface GroupEvidence {
   confirmed: boolean;
   /** Windows that contributed (most recent last), for overlap checks. */
   windows: { t0: number; t1: number }[];
+  /** Best share of the line's weight heard in one window. */
+  coverage: number;
 }
 
 type Mode =
@@ -53,6 +65,7 @@ export class RecognitionSession {
   private mode: Mode = { kind: 'identify' };
   private snapshot: Candidate[] = [];
   private freshSince = -Infinity;
+  private offTrackShabad = '';
   private lastSeq = -1;
   private lastT = 0;
   readonly params: EngineParams;
@@ -66,7 +79,7 @@ export class RecognitionSession {
     if (w.sessionId !== this.sessionId || w.seq <= this.lastSeq) return null;
     this.lastSeq = w.seq;
     this.lastT = w.t1;
-    const tokens = tokenize(w.text);
+    const tokens = queryTokens(w.text);
     const base = { sessionId: this.sessionId, seq: w.seq, t0: w.t0, t1: w.t1 };
     if (this.mode.kind === 'track') return this.track(tokens, base);
     return this.identify(tokens, base);
@@ -97,7 +110,7 @@ export class RecognitionSession {
 
   // ---------------------------------------------------------------- identification
 
-  private identify(tokens: ReturnType<typeof tokenize>, base: Omit<EngineResponse, 'status' | 'reason'>): EngineResponse {
+  private identify(tokens: ReturnType<typeof queryTokens>, base: Omit<EngineResponse, 'status' | 'reason'>): EngineResponse {
     this.prune(base.t1);
     const p = this.params;
     const hits = tokens.length ? search(this.corpus, tokens) : [];
@@ -113,7 +126,9 @@ export class RecognitionSession {
     const [a, b] = candidates;
     const margin = a.support - (b?.support ?? 0);
     const decisive = this.freshDistinguishingGroup(a.shabadId, b?.shabadId);
-    if (a.support >= p.resolveMin && margin >= p.resolveMargin && decisive !== null) {
+    const shape = this.shape.get(a.shabadId) ?? { groups: 0, bestSingle: 0, complete: false };
+    const enough = shape.groups >= 2 || shape.bestSingle >= p.strongSingle || shape.complete;
+    if (a.support >= p.resolveMin && margin >= p.resolveMargin && decisive !== null && enough) {
       const lineIdx = this.lineOfGroupIn(decisive, a.shabadId, null);
       this.snapshot = candidates;
       this.mode = { kind: 'track', shabadId: a.shabadId, selectedBy: 'auto', currentLineIdx: lineIdx, paused: lineIdx === null, possible: [], offTrack: 0 };
@@ -123,6 +138,7 @@ export class RecognitionSession {
     const top = this.topGroup()!;
     const line = this.corpus.lines[this.corpus.groups[top][0]];
     const why = !strong.length ? 'no new evidence; keeping list'
+      : !enough && decisive !== null && a.support >= p.resolveMin ? 'one line so far; waiting for a second'
       : decisive === null && b ? 'no fresh distinguishing line yet'
       : `support ${a.support.toFixed(1)}, margin ${margin.toFixed(1)}`;
     this.snapshot = candidates;
@@ -157,7 +173,11 @@ export class RecognitionSession {
       return 1 / (1 + Math.log2(Math.max(1, ties)));
     };
     const bestPerGroup = new Map<number, number>();
-    for (const h of bestPerShabad.values()) bestPerGroup.set(h.line.group, Math.max(bestPerGroup.get(h.line.group) ?? 0, h.score * specificity(h)));
+    const coverage = new Map<number, number>();
+    for (const h of bestPerShabad.values()) {
+      bestPerGroup.set(h.line.group, Math.max(bestPerGroup.get(h.line.group) ?? 0, h.score * specificity(h)));
+      coverage.set(h.line.group, Math.max(coverage.get(h.line.group) ?? 0, Math.min(1, h.coverage)));
+    }
 
     // Overlapping audio heard more completely supersedes a weak earlier reading of it.
     const top = hits[0].score;
@@ -169,13 +189,14 @@ export class RecognitionSession {
     for (const [group, score] of bestPerGroup) {
       const e = this.evidence.get(group);
       if (!e) {
-        this.evidence.set(group, { group, best: score, firstHeard: t0, lastHeard: t1, lastT1: t1, hearings: 1, confirmed: group === hits[0].line.group, windows: [{ t0, t1 }] });
+        this.evidence.set(group, { group, best: score, firstHeard: t0, lastHeard: t1, lastT1: t1, hearings: 1, confirmed: group === hits[0].line.group, windows: [{ t0, t1 }], coverage: coverage.get(group) ?? 0 });
         continue;
       }
       if (t0 >= e.lastT1) e.hearings++; // a repeat: no new support
       e.best = Math.max(e.best, score);
       if (group === hits[0].line.group) e.confirmed = true;
       e.windows.push({ t0, t1 });
+      e.coverage = Math.max(e.coverage, coverage.get(group) ?? 0);
       if (e.windows.length > 24) e.windows.shift();
       e.lastHeard = t1;
       e.lastT1 = t1;
@@ -198,7 +219,10 @@ export class RecognitionSession {
    * counted for that shabad: overlapping windows re-hear the same sound, so one phrase cannot
    * become evidence for two different lines of one shabad.
    */
+  private shape = new Map<string, { groups: number; bestSingle: number; complete: boolean }>();
+
   private candidates(): Candidate[] {
+    this.shape.clear();
     const byShabad = new Map<string, GroupEvidence[]>();
     for (const e of this.evidence.values()) {
       for (const sid of this.corpus.groupShabads(e.group)) {
@@ -218,6 +242,8 @@ export class RecognitionSession {
       }
       const lines = list.flatMap((e) => this.corpus.groups[e.group].map((i) => this.corpus.lines[i]).filter((l) => l.shabadId === sid).map((l) => l.id));
       rows.push({ shabadId: sid, support: accepted.reduce((a, e) => a + e.best, 0), exact: list.some((e) => e.confirmed), lines });
+      const complete = accepted.some((e) => e.coverage >= this.params.completeCoverage && e.best >= this.params.completeMin);
+      this.shape.set(sid, { groups: accepted.length, bestSingle: accepted[0]?.best ?? 0, complete });
     }
     const ids = rows.map((r) => r.shabadId);
     return rows
@@ -277,10 +303,13 @@ export class RecognitionSession {
 
   // ---------------------------------------------------------------- live tracking
 
-  private track(tokens: ReturnType<typeof tokenize>, base: Omit<EngineResponse, 'status' | 'reason'>): EngineResponse {
+  private track(tokens: ReturnType<typeof queryTokens>, base: Omit<EngineResponse, 'status' | 'reason'>): EngineResponse {
     const m = this.mode as Extract<Mode, { kind: 'track' }>;
     const p = this.params;
     if (!tokens.length) return this.trackResponse(base, 'no speech; holding position');
+    // Long windows help identification; to follow the line being sung now, use only the
+    // most recent words (the start of a long window still holds the previous line).
+    if (tokens.length > p.trackWords) tokens = tokens.slice(-p.trackWords);
 
     const within = this.corpus.shabads.get(m.shabadId)!.lines.filter((i) => this.corpus.lines[i].indexed);
     const hits = search(this.corpus, tokens, { within })
@@ -313,10 +342,13 @@ export class RecognitionSession {
     return this.advance(m, best.h.line.idx, base, `line score ${best.eff.toFixed(1)}`);
   }
 
-  private checkSwitch(tokens: ReturnType<typeof tokenize>, base: Omit<EngineResponse, 'status' | 'reason'>): EngineResponse | null {
+  private checkSwitch(tokens: ReturnType<typeof queryTokens>, base: Omit<EngineResponse, 'status' | 'reason'>): EngineResponse | null {
     const m = this.mode as Extract<Mode, { kind: 'track' }>;
     const strong = this.strongHits(search(this.corpus, tokens)).filter((h) => h.score >= this.params.resolveMin && !this.corpus.groupShabads(h.line.group).includes(m.shabadId));
     if (!strong.length) { m.offTrack = 0; return null; }
+    // Count only when the same other shabad keeps leading; scattered chance matches do not.
+    const other = this.corpus.groupShabads(strong[0].line.group).join(',');
+    if (other !== this.offTrackShabad) { this.offTrackShabad = other; m.offTrack = 0; }
     m.offTrack++;
     if (m.offTrack < this.params.switchAfter) return null;
     // Kirtan has moved on to another shabad: start identifying again from this evidence.

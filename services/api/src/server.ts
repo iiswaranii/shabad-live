@@ -8,7 +8,7 @@
 //   POST   /v1/sessions/:id/clear                                    -> EngineResponse
 //   DELETE /v1/sessions/:id
 //   GET    /v1/shabads/:id                                           -> full shabad text
-//   POST   /v1/sessions/:id/audio                                    -> 501 until an ASR adapter is configured
+//   POST   /v1/transcribe   16 kHz mono Int16 PCM (≤ 30 s)         -> { text, ms }   (kirtan model)
 //   GET    /v1/health
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Corpus, RecognitionSession, type CorpusPack } from '@shabad/core';
+import { asrReady, backlog, loadKirtanAsr, transcribe } from './asr';
 
 export function loadCorpus(dir: string, sourceIds = [1, 3, 5]): Corpus {
   const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as { packs: { file: string; sourceId: number }[] };
@@ -42,6 +43,11 @@ export function createApp(corpus: Corpus) {
     req.on('data', (c) => { data += c; if (data.length > 64_000) { fail(new Error('body too large')); req.destroy(); } });
     req.on('end', () => { try { ok(data ? JSON.parse(data) : {}); } catch (e) { fail(e); } });
   });
+  const readBody = (req: IncomingMessage, max: number) => new Promise<Buffer>((ok, fail) => {
+    const chunks: Buffer[] = []; let n = 0;
+    req.on('data', (c: Buffer) => { n += c.length; if (n > max) { fail(new Error('audio too long (max 30 s)')); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => ok(Buffer.concat(chunks)));
+  });
 
   return createServer(async (req, res) => {
     try {
@@ -50,7 +56,18 @@ export function createApp(corpus: Corpus) {
       const parts = url.pathname.split('/').filter(Boolean);
       if (parts[0] !== 'v1') return send(res, 404, { error: 'not found' });
 
-      if (parts[1] === 'health') return send(res, 200, { ok: true, corpus: corpus.stats() });
+      if (parts[1] === 'health') return send(res, 200, { ok: true, corpus: corpus.stats(), kirtanModel: asrReady() });
+
+      if (parts[1] === 'transcribe' && req.method === 'POST') {
+        if (!asrReady()) return send(res, 503, { error: 'kirtan model not loaded on this server' });
+        if (backlog() >= 2) return send(res, 429, { error: 'busy; send the next chunk when this one returns' });
+        const body = await readBody(req, 16000 * 2 * 30);
+        const pcm = new Int16Array(body.buffer, body.byteOffset, Math.floor(body.byteLength / 2));
+        const audio = new Float32Array(pcm.length);
+        for (let i = 0; i < pcm.length; i++) audio[i] = pcm[i] / 32768;
+        const r = await transcribe(audio); // in memory only; nothing is written
+        return send(res, 200, { text: r.text, ms: r.ms, seconds: audio.length / 16000 });
+      }
 
       if (parts[1] === 'shabads' && parts[2] && req.method === 'GET') {
         const sh = corpus.shabads.get(parts[2]);
@@ -85,8 +102,6 @@ export function createApp(corpus: Corpus) {
         }
         case 'clear':
           return send(res, 200, s.clearSelection());
-        case 'audio':
-          return send(res, 501, { error: 'no server-side ASR adapter configured; send recogniser text windows to /windows' });
         default:
           return send(res, 404, { error: 'not found' });
       }
@@ -100,4 +115,8 @@ if (process.argv[1] && resolve(process.argv[1]).endsWith('server.ts')) {
   const port = Number(process.env.PORT ?? 8787);
   const corpus = loadCorpus(resolve(process.env.CORPUS_DIR ?? 'corpus'));
   createApp(corpus).listen(port, () => console.log(`shabad-live api on :${port} — ${JSON.stringify(corpus.stats())}`));
+  if (process.env.KIRTAN_MODEL_DIR) {
+    console.log('loading kirtan model…');
+    loadKirtanAsr(resolve(process.env.KIRTAN_MODEL_DIR)).then(() => console.log('kirtan model ready: POST /v1/transcribe'), (e) => console.error('kirtan model failed:', e.message));
+  }
 }

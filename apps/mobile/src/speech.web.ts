@@ -41,6 +41,12 @@ export class SpeechAdapter implements RecognitionAdapter {
   private handlers: Parameters<RecognitionAdapter['start']>[0] | null = null;
   /** Called once audio capture is running (the sound meter may attach then). */
   onAudioStart: (() => void) | null = null;
+  /**
+   * Vocal-filtered audio to recognise instead of the raw microphone, where the browser
+   * supports start(MediaStreamTrack) (recent Chrome). Falls back to the microphone otherwise.
+   */
+  track: MediaStreamTrack | null = null;
+  usingTrack = false;
 
   constructor(private lang: string) {}
 
@@ -96,6 +102,7 @@ export class SpeechAdapter implements RecognitionAdapter {
         onError(this.everStarted ? 'needs_tap' : 'mic_blocked');
       } else if (code === 'service-not-allowed') { this.active = false; onError('speech_service_off'); }
       else if (code === 'language-not-supported') { this.active = false; onError('lang_unsupported'); }
+      else if (code === 'audio-capture' && this.usingTrack) { this.track = null; this.usingTrack = false; } // retry with the mic on restart
       else if (code === 'audio-capture') { this.active = false; onError('audio_capture'); }
       else if (code === 'network') onError('network');
       else onError(`speech_error:${code}`);
@@ -111,7 +118,10 @@ export class SpeechAdapter implements RecognitionAdapter {
     this.rec = r;
     this.startedAt = Date.now();
     try {
-      r.start();
+      this.usingTrack = false;
+      if (this.track && this.track.readyState === 'live') {
+        try { (r as any).start(this.track); this.usingTrack = true; } catch { this.track = null; r.start(); }
+      } else r.start();
     } catch (err) {
       if (!this.everStarted) throw err;
       this.active = false;

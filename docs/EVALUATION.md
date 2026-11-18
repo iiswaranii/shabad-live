@@ -9,29 +9,29 @@ Generated 2026-11-18 by `npm run eval`.
 
 ## Measured (synthetic)
 
-| metric | tune (A: clear_close) | eval — all held-out | eval — unseen_raagi | eval — distant_phone | eval — hindi_asr |
+| metric | tune — clear_close | eval — all held-out | eval — unseen_raagi | eval — distant_phone | eval — hindi_asr |
 |---|---|---|---|---|---|
 | clips | 10 | 30 | 10 | 10 | 10 |
-| correctIdentification | 100.0% | 93.3% | 100.0% | 80.0% | 100.0% |
-| correctAtEnd | 100.0% | 96.7% | 100.0% | 90.0% | 100.0% |
-| wrongAutomaticOpens | 0 in 10 clips | 1 in 30 clips | 0 in 10 clips | 1 in 10 clips | 0 in 10 clips |
-| unresolved | 0.0% | 3.3% | 0.0% | 10.0% | 0.0% |
+| correctIdentification | 100.0% | 93.3% | 100.0% | 90.0% | 90.0% |
+| correctAtEnd | 100.0% | 93.3% | 100.0% | 90.0% | 90.0% |
+| wrongAutomaticOpens | 0 in 10 clips | 0 in 30 clips | 0 in 10 clips | 0 in 10 clips | 0 in 10 clips |
+| unresolved | 0.0% | 6.7% | 0.0% | 10.0% | 10.0% |
 | candidateRecall | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% |
-| identificationDelayMedianSec | 5.0 | 18.5 | 21.5 | 24.5 | 11.0 |
-| lineAccuracyStrict | 78.4% | 70.0% | 72.6% | 62.0% | 75.2% |
-| lineAccuracySettled | 97.4% | 86.2% | 89.7% | 76.3% | 92.9% |
-| lineAssertedShare | 93.4% | 89.9% | 88.6% | 90.7% | 90.7% |
+| identificationDelayMedianSec | 8.0 | 27.5 | 27.5 | 42.5 | 15.5 |
+| lineAccuracyStrict | 78.3% | 68.9% | 71.3% | 60.6% | 74.3% |
+| lineAccuracySettled | 97.3% | 85.6% | 88.6% | 74.9% | 93.0% |
+| lineAssertedShare | 92.7% | 88.4% | 87.4% | 89.2% | 88.8% |
 | instrumentalFalseMoves | 0 | 3 | 0 | 2 | 1 |
-| highlightDelayMedianSec | 2.5 | 3.8 | 4.0 | 4.3 | 3.2 |
-| highlightDelayP90Sec | 4.8 | 6.8 | 7.6 | 7.2 | 5.9 |
-| linesNeverHighlighted | 0.0% | 5.6% | 3.2% | 13.5% | 1.0% |
+| highlightDelayMedianSec | 2.7 | 3.8 | 4.0 | 4.3 | 3.2 |
+| highlightDelayP90Sec | 4.9 | 6.8 | 6.8 | 7.2 | 6.2 |
+| linesNeverHighlighted | 0.0% | 6.6% | 4.5% | 16.0% | 1.0% |
 
 Corpus searched: Sri Guru Granth Sahib Ji + Vaaran Bhai Gurdas Ji + Ghazals Bhai Nand Lal Ji (full packs).
-Clips: 40 (10 shabads × 4 simulated performances; performance A = tuning, B–D held out).
+Clips: 40 (10 shabads × 4 simulated performances). Groups starting "tune" were used to set thresholds; "eval" groups were held out. Windows: as stored in the clips.
 
 ### Clips not correctly auto-opened
 
-- QNL-C: opened X0H, 1 wrong auto-open(s)
+- QNL-D: opened nothing
 - 6U1-C: opened nothing
 
 ## Proposed targets (not yet measured on real audio)
