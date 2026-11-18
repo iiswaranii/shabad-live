@@ -7,8 +7,8 @@ remote=$(git remote get-url origin)
 tmp=$(mktemp -d)
 cp -R apps/mobile/dist/. "$tmp"
 cd "$tmp"
-git init -q -b gh-pages
+git init -q && git checkout -q -b gh-pages
 git add -A
 git commit -q -m "Publish web app $(date -u +%Y-%m-%dT%H:%MZ)"
-git push -q --force "$remote" gh-pages
+git -c http.postBuffer=524288000 push -q --force "$remote" gh-pages
 echo "published to gh-pages"
