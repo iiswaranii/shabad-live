@@ -1,6 +1,7 @@
 // Practice mode: plays SYNTHETIC recogniser output for real shabads in real time, so the
 // screens can be tried without live kirtan. It never touches the microphone.
 
+import { levelBus } from './level';
 import { simulate, structure, PROFILES, type Corpus, type PlanStep, type RecognitionAdapter } from '@shabad/core';
 
 export type Scenario = 1 | 2 | 3 | 4;
@@ -25,12 +26,19 @@ export class PracticeAdapter implements RecognitionAdapter {
 
   start({ onText }: Parameters<RecognitionAdapter['start']>[0]) {
     const clip = simulate(this.corpus, plan(this.corpus, this.scenario), PROFILES.clear_close, 7 + this.scenario);
-    for (const w of clip.words) this.timers.push(setTimeout(() => onText(w.text, true), w.t * 1000));
+    // Each simulated word also pulses the listening rings, so Practice shows the animation.
+    for (const w of clip.words) this.timers.push(setTimeout(() => { onText(w.text, true); levelBus.pulse(0.45 + Math.random() * 0.5); }, w.t * 1000));
+    // A soft simulated tabla beat (~100 bpm) under everything, including instrumental passages.
+    this.beat = setInterval(() => { this.n++; levelBus.pulse(this.n % 4 === 0 ? 0.5 : 0.28); }, 600);
   }
+  private beat: ReturnType<typeof setInterval> | null = null;
+  private n = 0;
 
   stop() {
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
+    if (this.beat) clearInterval(this.beat);
+    this.beat = null;
   }
 }
 

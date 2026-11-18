@@ -102,13 +102,23 @@ export class ListenController {
     const sessionId = this.o.newId();
     this.seq = 0; this.lastApplied = -1; this.words = []; this.finalCount = 0;
     this.startedAt = this.o.now();
-    await this.engine.open(sessionId);
     this.set({ phase: 'listening', sessionId, response: null, heardText: '', error: null, detached: false, readingLineId: null });
+    // The recogniser is started synchronously, before any await: mobile Safari only lets
+    // speech recognition start inside the tap that asked for it.
+    let started: void | Promise<void>;
     try {
-      await this.adapter.start({
+      started = this.adapter.start({
         onText: (text, isFinal) => this.onText(sessionId, text, isFinal),
         onError: (message) => { if (this.state.sessionId === sessionId) this.set({ error: message }); },
       });
+    } catch (e) {
+      this.adapter.stop();
+      this.set({ phase: 'error', error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    try {
+      await this.engine.open(sessionId);
+      await started;
     } catch (e) {
       this.adapter.stop();
       this.set({ phase: 'error', error: e instanceof Error ? e.message : String(e) });
@@ -138,6 +148,9 @@ export class ListenController {
     const r = await this.engine.clear(id);
     if (id === this.state.sessionId) this.set({ response: r });
   }
+
+  /** Clear a recoverable error after the adapter has been resumed. */
+  clearError() { this.set({ error: null }); }
 
   setReadingPosition(lineId: string | null, detached: boolean) {
     this.set({ readingLineId: lineId, detached });
