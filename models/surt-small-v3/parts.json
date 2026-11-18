@@ -1,0 +1,5 @@
+{
+  "parts": {
+    "decoder_model_merged_quantized.onnx": 3
+  }
+}
